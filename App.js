@@ -1,57 +1,116 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, View, ActivityIndicator } from 'react-native';
-import { WebView } from 'react-native-webview';
-import { useState } from 'react';
+import { StatusBar } from "expo-status-bar";
+import {
+  StyleSheet,
+  View,
+  ActivityIndicator,
+  BackHandler,
+  Platform
+} from "react-native";
+import { WebView } from "react-native-webview";
+import { useEffect, useRef, useState } from "react";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function App() {
   const [loading, setLoading] = useState(true);
-  
-  // Replace with your web app URL
-  const webUrl = 'https://littlekart.com';
+  const webviewRef = useRef(null);
+
+  // DEV / PROD URL
+  const webUrl = "http://192.168.29.117:3000";
+  // const webUrl = "https://littlekart.com";
+
+  /* ===============================
+     ANDROID BACK BUTTON HANDLING
+  ================================ */
+  useEffect(() => {
+    const onBackPress = () => {
+      if (webviewRef.current) {
+        webviewRef.current.injectJavaScript(`
+          (function() {
+            if (window.history.length > 1) {
+              window.history.back();
+              true;
+            } else {
+              false;
+            }
+          })();
+        `);
+        return true; // prevent app exit
+      }
+      return false;
+    };
+
+    const subscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      onBackPress
+    );
+
+    return () => subscription.remove(); // ✅ correct cleanup
+  }, []);
 
   return (
-    <View style={styles.container}>
-      <StatusBar style="auto" />
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar style="dark" />
+
       <WebView
+        ref={webviewRef}
         source={{ uri: webUrl }}
         style={styles.webview}
         onLoadStart={() => setLoading(true)}
         onLoadEnd={() => setLoading(false)}
-        // Allow JavaScript
-        javaScriptEnabled={true}
-        // Allow DOM storage
-        domStorageEnabled={true}
-        // Start in loading state
-        startInLoadingState={true}
-        // Allow media playback
-        allowsInlineMediaPlayback={true}
+
+        /* ===== REQUIRED SETTINGS ===== */
+        javaScriptEnabled
+        domStorageEnabled
+        allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
+
+        /* ===== PREVENT ZOOM ===== */
+        scalesPageToFit={false}
+        setBuiltInZoomControls={false}
+        setDisplayZoomControls={false}
+
+        /* 🔒 FORCE DISABLE PINCH ZOOM (CRITICAL) */
+        injectedJavaScript={`
+          (function() {
+            var meta = document.querySelector('meta[name=viewport]');
+            if (!meta) {
+              meta = document.createElement('meta');
+              meta.name = 'viewport';
+              document.head.appendChild(meta);
+            }
+            meta.content = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no';
+          })();
+          true;
+        `}
+        /* ===== ANDROID OPTIMIZATION ===== */
+        overScrollMode="never"
+        mixedContentMode="always"
       />
+
       {loading && (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#0000ff" />
+        <View style={styles.loading}>
+          <ActivityIndicator size="large" color="#000" />
         </View>
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 
+/* ===============================
+   STYLES
+================================ */
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff"
   },
   webview: {
-    flex: 1,
+    flex: 1
   },
-  loadingContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-  },
+  loading: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#fff",
+    justifyContent: "center",
+    alignItems: "center"
+  }
 });
