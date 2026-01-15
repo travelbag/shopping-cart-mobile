@@ -14,9 +14,8 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const webviewRef = useRef(null);
 
-  // DEV / PROD URL
-  const webUrl = "http://192.168.29.117:3000";
-  // const webUrl = "https://littlekart.com";
+  // PROD URL
+  const webUrl = "https://littlekart.com";
 
   /* ===============================
      ANDROID BACK BUTTON HANDLING
@@ -34,7 +33,7 @@ export default function App() {
             }
           })();
         `);
-        return true; // prevent app exit
+        return true;
       }
       return false;
     };
@@ -44,34 +43,40 @@ export default function App() {
       onBackPress
     );
 
-    return () => subscription.remove(); // ✅ correct cleanup
+    return () => subscription.remove();
   }, []);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
+      {/* Status bar height respected */}
       <StatusBar style="dark" />
 
       <WebView
         ref={webviewRef}
         source={{ uri: webUrl }}
         style={styles.webview}
+
+        /* ===== iOS SAFE AREA FIX (CRITICAL) ===== */
+        contentInsetAdjustmentBehavior="never"
+
         onLoadStart={() => setLoading(true)}
         onLoadEnd={() => setLoading(false)}
 
-        /* ===== REQUIRED SETTINGS ===== */
+        /* ===== CORE SETTINGS ===== */
         javaScriptEnabled
         domStorageEnabled
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
 
-        /* ===== PREVENT ZOOM ===== */
+        /* ===== DISABLE ZOOM ===== */
         scalesPageToFit={false}
         setBuiltInZoomControls={false}
         setDisplayZoomControls={false}
 
-        /* 🔒 FORCE DISABLE PINCH ZOOM (CRITICAL) */
+        /* ===== FORCE VIEWPORT + SAFE AREA ===== */
         injectedJavaScript={`
           (function() {
+            // Viewport fix
             var meta = document.querySelector('meta[name=viewport]');
             if (!meta) {
               meta = document.createElement('meta');
@@ -82,6 +87,7 @@ export default function App() {
           })();
           true;
         `}
+
         /* ===== ANDROID OPTIMIZATION ===== */
         overScrollMode="never"
         mixedContentMode="always"
