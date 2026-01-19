@@ -15,7 +15,8 @@ export default function App() {
   const webviewRef = useRef(null);
 
   // PROD URL
-  const webUrl = "https://littlekart.com";
+  const webURl = "http://192.168.1.4:8080";
+  // const webUrl = "https://littlekart.com";
 
   /* ===============================
      ANDROID BACK BUTTON HANDLING
