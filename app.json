@@ -17,6 +17,8 @@
       "bundleIdentifier": "com.littlekart.shoppingcart",
       "buildNumber": "1",
       "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "We need your location to show nearby stores and delivery availability.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Location is required to detect your delivery location.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -26,9 +28,11 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.littlekart.shoppingcart",
-      "versionCode": 2,
+      "versionCode": 13,
       "permissions": [
-        "INTERNET"
+        "INTERNET",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
       ],
       "edgeToEdgeEnabled": true
     },

@@ -15,8 +15,9 @@ export default function App() {
   const webviewRef = useRef(null);
 
   // PROD URL
-  const webURl = "http://192.168.1.4:8080";
-  // const webUrl = "https://littlekart.com";
+  const webUrl = __DEV__
+    ? "http://192.168.29.117:3000"
+    : "https://littlekart.com";
 
   /* ===============================
      ANDROID BACK BUTTON HANDLING
@@ -68,7 +69,12 @@ export default function App() {
         domStorageEnabled
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
+        geolocationEnabled={true}
 
+        onPermissionRequest={(event) => {
+          event.grant(event.resources);
+        }}
+        
         /* ===== DISABLE ZOOM ===== */
         scalesPageToFit={false}
         setBuiltInZoomControls={false}
