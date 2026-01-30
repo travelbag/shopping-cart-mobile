@@ -9,10 +9,12 @@ import {
 import { WebView } from "react-native-webview";
 import { useEffect, useRef, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function App() {
   const [loading, setLoading] = useState(true);
   const webviewRef = useRef(null);
+  const insets = useSafeAreaInsets();
 
   // PROD URL
   const webUrl = __DEV__
@@ -26,30 +28,28 @@ export default function App() {
     const onBackPress = () => {
       if (webviewRef.current) {
         webviewRef.current.injectJavaScript(`
-          (function() {
-            if (window.history.length > 1) {
-              window.history.back();
-              true;
-            } else {
-              false;
-            }
-          })();
+          if (window.history.length > 1) {
+            window.history.back();
+            true;
+          } else {
+            false;
+          }
         `);
         return true;
       }
       return false;
     };
 
-    const subscription = BackHandler.addEventListener(
-      "hardwareBackPress",
-      onBackPress
-    );
-
-    return () => subscription.remove();
+    const sub = BackHandler.addEventListener("hardwareBackPress", onBackPress);
+    return () => sub.remove();
   }, []);
 
+  
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top"]}>
+    <SafeAreaView
+      style={styles.safeArea}
+      edges={Platform.OS === "ios" ? ["top", "bottom"] : ["top"]}
+    >
       {/* Status bar height respected */}
       <StatusBar style="dark" />
 
@@ -71,6 +71,10 @@ export default function App() {
         mediaPlaybackRequiresUserAction={false}
         geolocationEnabled={true}
 
+        onGeolocationPermissionsShowPrompt={(origin, callback) => {
+          callback(true, false);
+        }}
+
         onPermissionRequest={(event) => {
           event.grant(event.resources);
         }}
@@ -91,6 +95,10 @@ export default function App() {
               document.head.appendChild(meta);
             }
             meta.content = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no';
+            document.documentElement.style.setProperty(
+              '--rn-safe-bottom',
+              '${insets.bottom}px'
+            );
           })();
           true;
         `}
@@ -115,7 +123,7 @@ export default function App() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#fff"
+    backgroundColor: "#fff",
   },
   webview: {
     flex: 1

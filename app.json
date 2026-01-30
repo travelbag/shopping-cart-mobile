@@ -28,7 +28,7 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.littlekart.shoppingcart",
-      "versionCode": 13,
+      "versionCode": 14,
       "permissions": [
         "INTERNET",
         "ACCESS_FINE_LOCATION",
