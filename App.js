@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 export default function App() {
   const [loading, setLoading] = useState(true);
   const webviewRef = useRef(null);
+  const navStateRef = useRef({ canGoBack: false, url: "" });
   const insets = useSafeAreaInsets();
 
   // PROD URL
@@ -24,17 +25,27 @@ export default function App() {
   /* ===============================
      ANDROID BACK BUTTON HANDLING
   ================================ */
+  const normalizeUrl = (url) => {
+    if (!url) return "";
+    return url.replace(/\/+$/, "");
+  };
+
+  const isHomeUrl = (url) => {
+    return normalizeUrl(url) === normalizeUrl(webUrl);
+  };
+
   useEffect(() => {
     const onBackPress = () => {
+      if (Platform.OS !== "android") return false;
+
+      const { canGoBack, url } = navStateRef.current;
+      if (!canGoBack || isHomeUrl(url)) {
+        BackHandler.exitApp();
+        return true;
+      }
+
       if (webviewRef.current) {
-        webviewRef.current.injectJavaScript(`
-          if (window.history.length > 1) {
-            window.history.back();
-            true;
-          } else {
-            false;
-          }
-        `);
+        webviewRef.current.goBack();
         return true;
       }
       return false;
@@ -42,7 +53,7 @@ export default function App() {
 
     const sub = BackHandler.addEventListener("hardwareBackPress", onBackPress);
     return () => sub.remove();
-  }, []);
+  }, [webUrl]);
 
   
   return (
@@ -63,6 +74,12 @@ export default function App() {
 
         onLoadStart={() => setLoading(true)}
         onLoadEnd={() => setLoading(false)}
+        onNavigationStateChange={(navState) => {
+          navStateRef.current = {
+            canGoBack: navState.canGoBack,
+            url: navState.url,
+          };
+        }}
 
         /* ===== CORE SETTINGS ===== */
         javaScriptEnabled
