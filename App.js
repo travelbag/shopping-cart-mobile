@@ -4,10 +4,11 @@ import {
   View,
   ActivityIndicator,
   BackHandler,
-  Platform
+  Platform,
+  Share
 } from "react-native";
 import { WebView } from "react-native-webview";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -33,6 +34,23 @@ export default function App() {
   const isHomeUrl = (url) => {
     return normalizeUrl(url) === normalizeUrl(webUrl);
   };
+
+  const onMessage = useCallback(async (event) => {
+    try {
+      const data = JSON.parse(event?.nativeEvent?.data ?? "{}");
+
+      if (data?.type === "SHARE_APP") {
+        const { title, text, url } = data?.payload || {};
+        await Share.share({
+          title,
+          message: text,
+          url,
+        });
+      }
+    } catch (_) {
+      // Ignore malformed bridge messages
+    }
+  }, []);
 
   useEffect(() => {
     const onBackPress = () => {
@@ -74,6 +92,7 @@ export default function App() {
 
         onLoadStart={() => setLoading(true)}
         onLoadEnd={() => setLoading(false)}
+        onMessage={onMessage}
         onNavigationStateChange={(navState) => {
           navStateRef.current = {
             canGoBack: navState.canGoBack,
