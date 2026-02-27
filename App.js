@@ -5,7 +5,8 @@ import {
   ActivityIndicator,
   BackHandler,
   Platform,
-  Share
+  Share,
+  Linking,
 } from "react-native";
 import { WebView } from "react-native-webview";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -20,7 +21,7 @@ export default function App() {
 
   // PROD URL
   const webUrl = __DEV__
-    ? "http://192.168.29.117:3000"
+    ? "http://192.168.1.6:3000"
     : "https://littlekart.com";
 
   /* ===============================
@@ -51,6 +52,24 @@ export default function App() {
       // Ignore malformed bridge messages
     }
   }, []);
+
+  const handleShouldStartLoadWithRequest = (request) => {
+    const url = request.url;
+
+    if (
+      url.startsWith("tel:") ||
+      url.startsWith("mailto:") ||
+      url.startsWith("whatsapp:")
+    ) {
+      Linking.openURL(url).catch(err => {
+        console.warn("Failed to open URL:", url, err);
+      });
+
+      return false; // VERY IMPORTANT: prevent WebView loading
+    }
+
+    return true;
+  };
 
   useEffect(() => {
     const onBackPress = () => {
@@ -86,6 +105,9 @@ export default function App() {
         ref={webviewRef}
         source={{ uri: webUrl }}
         style={styles.webview}
+
+        originWhitelist={["*"]}
+        onShouldStartLoadWithRequest={handleShouldStartLoadWithRequest}
 
         /* ===== iOS SAFE AREA FIX (CRITICAL) ===== */
         contentInsetAdjustmentBehavior="never"
