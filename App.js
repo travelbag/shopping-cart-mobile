@@ -18,18 +18,33 @@ export default function App() {
   const webviewRef = useRef(null);
   const navStateRef = useRef({ canGoBack: false, url: "" });
   const insets = useSafeAreaInsets();
+  // Dynamic cache-buster generated once per app launch.
+  const WEB_RELEASE_VERSION = useRef(`${Date.now()}`).current;
 
-  // PROD URL
-  const webUrl = __DEV__
-    ? "https://littlekart.com"
-    : "https://littlekart.com";
+  const appendReleaseVersion = (url, version) => {
+    if (!version) return url;
+    const [base, hash = ""] = url.split("#");
+    const separator = base.includes("?") ? "&" : "?";
+    return `${base}${separator}v=${encodeURIComponent(version)}${
+      hash ? `#${hash}` : ""
+    }`;
+  };
+
+  // PROD URL with cache-busting release marker.
+  const webUrl = appendReleaseVersion("https://littlekart.com", WEB_RELEASE_VERSION);
 
   /* ===============================
      ANDROID BACK BUTTON HANDLING
   ================================ */
   const normalizeUrl = (url) => {
     if (!url) return "";
-    return url.replace(/\/+$/, "");
+    try {
+      const parsed = new URL(url);
+      const path = parsed.pathname.replace(/\/+$/, "");
+      return `${parsed.origin}${path}`;
+    } catch (_) {
+      return url.replace(/\/+$/, "");
+    }
   };
 
   const isHomeUrl = (url) => {
@@ -105,6 +120,8 @@ export default function App() {
         ref={webviewRef}
         source={{ uri: webUrl }}
         style={styles.webview}
+        cacheEnabled={false}
+        cacheMode="LOAD_NO_CACHE"
 
         originWhitelist={["*"]}
         onShouldStartLoadWithRequest={handleShouldStartLoadWithRequest}
