@@ -19,7 +19,10 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "We need your location to show nearby stores and delivery availability.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Location is required to detect your delivery location.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoadsInWebContent": true
+        }
       }
     },
     "android": {
