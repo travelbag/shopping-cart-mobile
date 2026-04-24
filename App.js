@@ -12,6 +12,41 @@ import { WebView } from "react-native-webview";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Constants from "expo-constants";
+
+function resolveWebViewGoogleMapsApiKey() {
+  const fromEnv =
+    typeof process !== "undefined" && process.env?.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
+      ? String(process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY).trim()
+      : "";
+  if (fromEnv) return fromEnv;
+  const fromExtra = String(Constants.expoConfig?.extra?.googleMapsApiKey ?? "").trim();
+  return fromExtra;
+}
+
+const WEBVIEW_GOOGLE_MAPS_API_KEY = resolveWebViewGoogleMapsApiKey();
+
+/** Runs before any page script: inject Maps key for Places search + lock pinch-zoom (viewport). */
+const webviewInjectedJavaScriptBeforeContentLoaded = `
+(function () {
+  try {
+    var k = ${JSON.stringify(WEBVIEW_GOOGLE_MAPS_API_KEY)};
+    if (k) window.__LK_GOOGLE_MAPS_API_KEY__ = k;
+  } catch (e0) {}
+  try {
+    var c = "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover";
+    var m = document.querySelector('meta[name="viewport"]');
+    if (m) m.setAttribute("content", c);
+    else if (document.head) {
+      m = document.createElement("meta");
+      m.setAttribute("name", "viewport");
+      m.setAttribute("content", c);
+      document.head.insertBefore(m, document.head.firstChild);
+    }
+  } catch (e1) {}
+})();
+true;
+`;
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -342,6 +377,10 @@ export default function App() {
         domStorageEnabled
         originWhitelist={["*"]}
         mixedContentMode="always"
+        injectedJavaScriptBeforeContentLoaded={webviewInjectedJavaScriptBeforeContentLoaded}
+        {...(Platform.OS === "android"
+          ? { setBuiltInZoomControls: false, setDisplayZoomControls: false }
+          : {})}
         injectedJavaScript={webviewInjectedJavaScript}
         onShouldStartLoadWithRequest={handleShouldStartLoadWithRequest}
         onLoadStart={startLoading}
