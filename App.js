@@ -484,7 +484,7 @@ export default function App() {
   return (
     <SafeAreaView
       style={styles.safeArea}
-      edges={["top", "bottom"]}
+      edges={Platform.OS === "ios" ? ["top", "bottom"] : ["top"]}
     >
       {/* Status bar height respected */}
       <StatusBar style="dark" />
