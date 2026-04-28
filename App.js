@@ -7,11 +7,11 @@ import {
   Platform,
   Share,
   Linking,
+  ToastAndroid,
 } from "react-native";
 import { WebView } from "react-native-webview";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Constants from "expo-constants";
 
 function resolveWebViewGoogleMapsApiKey() {
@@ -49,17 +49,22 @@ true;
 `;
 
 export default function App() {
+  const EXIT_BACK_PRESS_INTERVAL_MS = 2000;
+  const BACK_PRESS_DEBOUNCE_MS = 700;
+  const EXIT_SUPPRESS_AFTER_NAV_MS = 1500;
   const [loading, setLoading] = useState(true);
   const webviewRef = useRef(null);
   const navStateRef = useRef({ canGoBack: false, url: "" });
+  const lastBackAttemptRef = useRef(0);
+  const lastBackHandledAtRef = useRef(0);
+  const suppressExitUntilRef = useRef(0);
   const loadTimeoutRef = useRef(null);
-  const insets = useSafeAreaInsets();
   const USE_LOCAL_WEB_URL = false;
   const PROD_WEB_URL = "https://littlekart.com";
   const LOCAL_WEB_URL = Platform.select({
-    android: "http://10.0.2.2:3000",
+    android: "http://192.168.29.117:3000",
     ios: "http://192.168.1.253:3000",
-    default: "http://192.168.1.253:3000",
+    default: "http://192.168.29.117:3000",
   });
   // Dynamic cache-buster generated once per app launch.
   const WEB_RELEASE_VERSION = useRef(`${Date.now()}`).current;
@@ -262,24 +267,62 @@ export default function App() {
   /* ===============================
      ANDROID BACK BUTTON HANDLING
   ================================ */
-  const normalizeUrl = (url) => {
-    if (!url) return "";
+  /** SPA path for HashRouter (#/cart) or path-based routing; home is "/" only. */
+  const getWebAppPath = (url) => {
+    if (!url) return "/";
     try {
-      const parsed = new URL(url);
-      const path = parsed.pathname.replace(/\/+$/, "");
-      return `${parsed.origin}${path}`;
+      const u = new URL(url);
+      const hash = u.hash || "";
+      if (hash.length > 1) {
+        const route = hash.startsWith("#") ? hash.slice(1) : hash;
+        const p = route.startsWith("/") ? route : `/${route}`;
+        const trimmed = p.replace(/\/+$/, "");
+        return trimmed === "" ? "/" : trimmed;
+      }
+      const path = u.pathname.replace(/\/+$/, "") || "/";
+      return path;
     } catch (_) {
-      return url.replace(/\/+$/, "");
+      return "/";
     }
   };
 
   const isHomeUrl = (url) => {
-    return normalizeUrl(url) === normalizeUrl(webUrl);
+    if (!url) return false;
+    try {
+      const current = new URL(url);
+      const base = new URL(webUrl);
+      if (current.origin !== base.origin) return false;
+      const path = getWebAppPath(url);
+      const normalizedPath = path === "" ? "/" : path;
+      const hasSearch = Boolean(current.search && current.search !== "?");
+      const hash = current.hash || "";
+      const normalizedHash = hash.replace(/^#/, "");
+      const hasRouteHash =
+        normalizedHash !== "" && normalizedHash !== "/" && normalizedHash !== "#";
+      return normalizedPath === "/" && !hasSearch && !hasRouteHash;
+    } catch (_) {
+      return false;
+    }
   };
 
   const onMessage = useCallback(async (event) => {
     try {
       const data = JSON.parse(event?.nativeEvent?.data ?? "{}");
+
+      if (data?.type === "EXIT_APP") {
+        if (Platform.OS === "android") {
+          const { canGoBack, url } = navStateRef.current;
+          if (!isHomeUrl(url) || canGoBack) return;
+          const now = Date.now();
+          if (now - lastBackAttemptRef.current >= EXIT_BACK_PRESS_INTERVAL_MS) {
+            lastBackAttemptRef.current = now;
+            ToastAndroid.show("Press back again to exit", ToastAndroid.SHORT);
+            return;
+          }
+          BackHandler.exitApp();
+        }
+        return;
+      }
 
       if (data?.type === "SHARE_APP") {
         const { title, text, url } = data?.payload || {};
@@ -292,7 +335,7 @@ export default function App() {
     } catch (_) {
       // Ignore malformed bridge messages
     }
-  }, []);
+  }, [EXIT_BACK_PRESS_INTERVAL_MS]);
 
   const handleShouldStartLoadWithRequest = (request) => {
     const url = request.url;
@@ -311,6 +354,51 @@ export default function App() {
 
     return true;
   };
+
+  const navigateToHome = useCallback(() => {
+    if (!webviewRef.current) return;
+    webviewRef.current.injectJavaScript(`
+      (function () {
+        try {
+          var homeUrl = ${JSON.stringify(webUrl)};
+          window.location.href = homeUrl;
+        } catch (e) {}
+      })();
+      true;
+    `);
+  }, [webUrl]);
+
+  const triggerWebBack = useCallback(() => {
+    if (!webviewRef.current) return;
+    webviewRef.current.injectJavaScript(`
+      (function () {
+        try {
+          if (window.history && window.history.length > 1) {
+            window.history.back();
+            return;
+          }
+          if (
+            window.location &&
+            window.location.hash &&
+            window.location.hash !== "#/" &&
+            window.location.hash !== "#"
+          ) {
+            window.location.hash = "#/";
+            return;
+          }
+          var backEl =
+            document.querySelector('[aria-label="Back"]') ||
+            document.querySelector('[title="Back"]') ||
+            document.querySelector('[data-testid="back"]') ||
+            document.querySelector('.back-button');
+          if (backEl && typeof backEl.click === "function") {
+            backEl.click();
+          }
+        } catch (e) {}
+      })();
+      true;
+    `);
+  }, []);
 
   const startLoading = () => {
     setLoading(true);
@@ -334,23 +422,55 @@ export default function App() {
   useEffect(() => {
     const onBackPress = () => {
       if (Platform.OS !== "android") return false;
+      const now = Date.now();
+
+      // Some devices fire duplicate hardware back events in quick succession.
+      // Swallow the duplicate so it doesn't chain into an unwanted app exit.
+      if (now - lastBackHandledAtRef.current < BACK_PRESS_DEBOUNCE_MS) {
+        return true;
+      }
+      lastBackHandledAtRef.current = now;
 
       const { canGoBack, url } = navStateRef.current;
-      if (!canGoBack || isHomeUrl(url)) {
+      const canNavigateInsideApp = canGoBack || !isHomeUrl(url);
+
+      // For non-home / back-capable states, always navigate within app first.
+      if (canNavigateInsideApp) {
+        lastBackAttemptRef.current = 0;
+        suppressExitUntilRef.current = now + EXIT_SUPPRESS_AFTER_NAV_MS;
+        if (canGoBack && webviewRef.current) {
+          webviewRef.current.goBack();
+          return true;
+        }
+        triggerWebBack();
+        return true;
+      }
+
+      // Home: require double back press to avoid accidental exits.
+      if (now < suppressExitUntilRef.current) {
+        lastBackAttemptRef.current = now;
+        ToastAndroid.show("Press back again to exit", ToastAndroid.SHORT);
+        return true;
+      }
+      const recentlyTried = now - lastBackAttemptRef.current < EXIT_BACK_PRESS_INTERVAL_MS;
+      if (recentlyTried) {
         BackHandler.exitApp();
         return true;
       }
+      lastBackAttemptRef.current = now;
+      ToastAndroid.show("Press back again to exit", ToastAndroid.SHORT);
+      return true;
 
-      if (webviewRef.current) {
-        webviewRef.current.goBack();
-        return true;
-      }
-      return false;
     };
 
     const sub = BackHandler.addEventListener("hardwareBackPress", onBackPress);
     return () => sub.remove();
-  }, [webUrl]);
+  }, [
+    EXIT_BACK_PRESS_INTERVAL_MS,
+    BACK_PRESS_DEBOUNCE_MS,
+    EXIT_SUPPRESS_AFTER_NAV_MS,
+    triggerWebBack,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -364,12 +484,13 @@ export default function App() {
   return (
     <SafeAreaView
       style={styles.safeArea}
-      edges={Platform.OS === "ios" ? ["top", "bottom"] : ["top"]}
+      edges={["top", "bottom"]}
     >
       {/* Status bar height respected */}
       <StatusBar style="dark" />
 
       <WebView
+        ref={webviewRef}
         source={{ uri: webUrl }}
         style={styles.webview}
         cacheEnabled={false}
@@ -382,6 +503,12 @@ export default function App() {
           ? { setBuiltInZoomControls: false, setDisplayZoomControls: false }
           : {})}
         injectedJavaScript={webviewInjectedJavaScript}
+        onNavigationStateChange={(navState) => {
+          navStateRef.current = {
+            canGoBack: Boolean(navState.canGoBack),
+            url: navState.url || "",
+          };
+        }}
         onShouldStartLoadWithRequest={handleShouldStartLoadWithRequest}
         onLoadStart={startLoading}
         onLoadEnd={stopLoading}
@@ -395,6 +522,7 @@ export default function App() {
           stopLoading();
         }}
         onHttpError={stopLoading}
+        onMessage={onMessage}
       />
 
       {loading && (
