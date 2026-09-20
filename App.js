@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   BackHandler,
   Platform,
+  PermissionsAndroid,
   Share,
   Linking,
   ToastAndroid,
@@ -13,6 +14,39 @@ import { WebView } from "react-native-webview";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Constants from "expo-constants";
+import * as StoreReview from "expo-store-review";
+
+/** Lazy-load expo-av so older native builds without ExponentAV still start. */
+const getExpoAudio = () => {
+  try {
+    // eslint-disable-next-line global-require
+    return require("expo-av").Audio;
+  } catch (error) {
+    console.warn("expo-av native module unavailable:", error);
+    return null;
+  }
+};
+
+/** Android runtime location permission for WebView geolocation / current location. */
+const requestLocationPermission = async () => {
+  if (Platform.OS !== "android") return true;
+  try {
+    const fine = PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION;
+    const coarse = PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION;
+    const fineGranted = await PermissionsAndroid.check(fine);
+    const coarseGranted = await PermissionsAndroid.check(coarse);
+    if (fineGranted || coarseGranted) return true;
+
+    const result = await PermissionsAndroid.requestMultiple([fine, coarse]);
+    return (
+      result[fine] === PermissionsAndroid.RESULTS.GRANTED ||
+      result[coarse] === PermissionsAndroid.RESULTS.GRANTED
+    );
+  } catch (error) {
+    console.warn("Location permission request failed:", error);
+    return false;
+  }
+};
 
 function resolveWebViewGoogleMapsApiKey() {
   const fromEnv =
@@ -25,6 +59,111 @@ function resolveWebViewGoogleMapsApiKey() {
 }
 
 const WEBVIEW_GOOGLE_MAPS_API_KEY = resolveWebViewGoogleMapsApiKey();
+
+const isHttpOrWebContentUrl = (url = "") => {
+  const lower = String(url || "").trim().toLowerCase();
+  return (
+    lower.startsWith("http://") ||
+    lower.startsWith("https://") ||
+    lower.startsWith("about:") ||
+    lower.startsWith("data:") ||
+    lower.startsWith("blob:") ||
+    lower.startsWith("file:")
+  );
+};
+
+const isBlockedWebViewScheme = (url = "") =>
+  String(url || "").trim().toLowerCase().startsWith("javascript:");
+
+/** UPI / wallet / tel links must leave WKWebView or iOS shows NSURLError -1002. */
+const shouldOpenOutsideWebView = (url = "") => {
+  const trimmed = String(url || "").trim();
+  if (!trimmed || isBlockedWebViewScheme(trimmed) || isHttpOrWebContentUrl(trimmed)) {
+    return false;
+  }
+  return true;
+};
+
+const openOutsideWebView = (url) => {
+  const targetUrl = String(url || "").trim();
+  if (!targetUrl || isBlockedWebViewScheme(targetUrl)) return;
+  Linking.openURL(targetUrl).catch((err) => {
+    console.warn("Failed to open URL:", targetUrl, err);
+  });
+};
+
+const launchInAppReview = async () => {
+  try {
+    const available = await StoreReview.isAvailableAsync();
+    if (!available) {
+      const storeUrl = StoreReview.storeUrl();
+      if (storeUrl) {
+        openOutsideWebView(storeUrl);
+      }
+      return;
+    }
+
+    const hasAction = await StoreReview.hasAction();
+    if (!hasAction) {
+      const storeUrl = StoreReview.storeUrl();
+      if (storeUrl) {
+        openOutsideWebView(storeUrl);
+      }
+      return;
+    }
+
+    // May complete without showing a dialog (Play/Apple quota).
+    await StoreReview.requestReview();
+  } catch (error) {
+    console.warn("In-app review request failed:", error);
+  }
+};
+
+/** Ask OS for RECORD_AUDIO so WebView getUserMedia / SpeechRecognition can work. */
+const requestMicrophonePermission = async () => {
+  try {
+    // expo-av covers iOS + Android and surfaces the system prompt.
+    const Audio = getExpoAudio();
+    if (Audio?.requestPermissionsAsync) {
+      const permission = await Audio.requestPermissionsAsync();
+      if (permission?.granted || permission?.status === "granted") {
+        return true;
+      }
+      if (permission?.status === "denied" || permission?.granted === false) {
+        return false;
+      }
+    }
+  } catch (error) {
+    console.warn("expo-av microphone permission failed, falling back:", error);
+  }
+
+  try {
+    if (Platform.OS === "android") {
+      const alreadyGranted = await PermissionsAndroid.check(
+        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
+      );
+      if (alreadyGranted) return true;
+
+      const result = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+        {
+          title: "Microphone permission",
+          message: "LittleKart needs microphone access for voice search.",
+          buttonPositive: "Allow",
+          buttonNegative: "Deny",
+          buttonNeutral: "Ask Me Later",
+        }
+      );
+      return result === PermissionsAndroid.RESULTS.GRANTED;
+    }
+
+    // iOS: WKWebView prompts once NSMicrophoneUsageDescription is present.
+    return true;
+  } catch (error) {
+    console.warn("Microphone permission request failed:", error);
+    return false;
+  }
+};
 
 /** Runs before any page script: inject Maps key for Places search + lock pinch-zoom (viewport). */
 const webviewInjectedJavaScriptBeforeContentLoaded = `
@@ -59,13 +198,20 @@ export default function App() {
   const lastBackHandledAtRef = useRef(0);
   const suppressExitUntilRef = useRef(0);
   const loadTimeoutRef = useRef(null);
+  // true = local web/DB (never production). Phone can't reach LAN, so use a
+  // Cloudflare tunnel to localhost:3000 while developing (see terminal).
   const USE_LOCAL_WEB_URL = false;
   const PROD_WEB_URL = "https://littlekart.com";
-  const LOCAL_WEB_URL = Platform.select({
-    android: "http://192.168.29.117:3000",
+  // LAN IP (works only if phone can reach PC). Prefer DEV_WEB_TUNNEL_URL below.
+  const LOCAL_LAN_WEB_URL = Platform.select({
+    android: "http://192.168.31.169:3000",
     ios: "http://192.168.1.253:3000",
-    default: "http://192.168.29.117:3000",
+    default: "http://192.168.31.169:3000",
   });
+  // From: npx cloudflared tunnel --url http://localhost:3000
+  const DEV_WEB_TUNNEL_URL =
+    "https://fully-tower-platinum-handmade.trycloudflare.com";
+  const LOCAL_WEB_URL = DEV_WEB_TUNNEL_URL || LOCAL_LAN_WEB_URL;
   // Dynamic cache-buster generated once per app launch.
   const WEB_RELEASE_VERSION = useRef(`${Date.now()}`).current;
 
@@ -305,6 +451,24 @@ export default function App() {
     }
   };
 
+  const replyMicrophonePermission = useCallback((granted) => {
+    if (!webviewRef.current) return;
+    const payload = JSON.stringify({
+      type: "MICROPHONE_PERMISSION_RESULT",
+      granted: Boolean(granted),
+    });
+    webviewRef.current.injectJavaScript(`
+      (function () {
+        try {
+          var payload = ${JSON.stringify(payload)};
+          window.dispatchEvent(new MessageEvent("message", { data: payload }));
+          document.dispatchEvent(new MessageEvent("message", { data: payload }));
+        } catch (e) {}
+      })();
+      true;
+    `);
+  }, []);
+
   const onMessage = useCallback(async (event) => {
     try {
       const data = JSON.parse(event?.nativeEvent?.data ?? "{}");
@@ -331,27 +495,37 @@ export default function App() {
           message: text,
           url,
         });
+        return;
+      }
+
+      if (data?.type === "OPEN_EXTERNAL_URL" && data?.url) {
+        openOutsideWebView(data.url);
+        return;
+      }
+
+      if (data?.type === "REQUEST_MICROPHONE_PERMISSION") {
+        const granted = await requestMicrophonePermission();
+        replyMicrophonePermission(granted);
+        return;
+      }
+
+      if (data?.type === "REQUEST_IN_APP_REVIEW") {
+        await launchInAppReview();
       }
     } catch (_) {
       // Ignore malformed bridge messages
     }
-  }, [EXIT_BACK_PRESS_INTERVAL_MS]);
+  }, [EXIT_BACK_PRESS_INTERVAL_MS, replyMicrophonePermission]);
 
   const handleShouldStartLoadWithRequest = (request) => {
-    const url = request.url;
-
-    if (
-      url.startsWith("tel:") ||
-      url.startsWith("mailto:") ||
-      url.startsWith("whatsapp:")
-    ) {
-      Linking.openURL(url).catch(err => {
-        console.warn("Failed to open URL:", url, err);
-      });
-
-      return false; // VERY IMPORTANT: prevent WebView loading
+    const url = String(request?.url || "");
+    if (isBlockedWebViewScheme(url)) {
+      return false;
     }
-
+    if (shouldOpenOutsideWebView(url)) {
+      openOutsideWebView(url);
+      return false;
+    }
     return true;
   };
 
@@ -480,7 +654,10 @@ export default function App() {
     };
   }, []);
 
-  
+  useEffect(() => {
+    requestLocationPermission();
+  }, []);
+
   return (
     <SafeAreaView
       style={styles.safeArea}
@@ -496,8 +673,17 @@ export default function App() {
         cacheEnabled={false}
         javaScriptEnabled
         domStorageEnabled
+        geolocationEnabled
         originWhitelist={["*"]}
         mixedContentMode="always"
+        mediaPlaybackRequiresUserAction={false}
+        allowsInlineMediaPlayback
+        mediaCapturePermissionGrantType="grant"
+        onGeolocationPermissionsShowPrompt={(origin, callback) => {
+          requestLocationPermission().then((granted) => {
+            callback(origin, granted, false);
+          });
+        }}
         injectedJavaScriptBeforeContentLoaded={webviewInjectedJavaScriptBeforeContentLoaded}
         {...(Platform.OS === "android"
           ? { setBuiltInZoomControls: false, setDisplayZoomControls: false }
