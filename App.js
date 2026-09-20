@@ -5,213 +5,57 @@ import {
   ActivityIndicator,
   BackHandler,
   Platform,
-  PermissionsAndroid,
   Share,
   Linking,
-  ToastAndroid,
+  PermissionsAndroid,
 } from "react-native";
 import { WebView } from "react-native-webview";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
-import Constants from "expo-constants";
-import * as StoreReview from "expo-store-review";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-/** Lazy-load expo-av so older native builds without ExponentAV still start. */
-const getExpoAudio = () => {
-  try {
-    // eslint-disable-next-line global-require
-    return require("expo-av").Audio;
-  } catch (error) {
-    console.warn("expo-av native module unavailable:", error);
-    return null;
-  }
-};
-
-/** Android runtime location permission for WebView geolocation / current location. */
-const requestLocationPermission = async () => {
-  if (Platform.OS !== "android") return true;
-  try {
-    const fine = PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION;
-    const coarse = PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION;
-    const fineGranted = await PermissionsAndroid.check(fine);
-    const coarseGranted = await PermissionsAndroid.check(coarse);
-    if (fineGranted || coarseGranted) return true;
-
-    const result = await PermissionsAndroid.requestMultiple([fine, coarse]);
-    return (
-      result[fine] === PermissionsAndroid.RESULTS.GRANTED ||
-      result[coarse] === PermissionsAndroid.RESULTS.GRANTED
-    );
-  } catch (error) {
-    console.warn("Location permission request failed:", error);
-    return false;
-  }
-};
-
-function resolveWebViewGoogleMapsApiKey() {
-  const fromEnv =
-    typeof process !== "undefined" && process.env?.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
-      ? String(process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY).trim()
-      : "";
-  if (fromEnv) return fromEnv;
-  const fromExtra = String(Constants.expoConfig?.extra?.googleMapsApiKey ?? "").trim();
-  return fromExtra;
-}
-
-const WEBVIEW_GOOGLE_MAPS_API_KEY = resolveWebViewGoogleMapsApiKey();
-
-const isHttpOrWebContentUrl = (url = "") => {
-  const lower = String(url || "").trim().toLowerCase();
-  return (
-    lower.startsWith("http://") ||
-    lower.startsWith("https://") ||
-    lower.startsWith("about:") ||
-    lower.startsWith("data:") ||
-    lower.startsWith("blob:") ||
-    lower.startsWith("file:")
-  );
-};
-
-const isBlockedWebViewScheme = (url = "") =>
-  String(url || "").trim().toLowerCase().startsWith("javascript:");
-
-/** UPI / wallet / tel links must leave WKWebView or iOS shows NSURLError -1002. */
-const shouldOpenOutsideWebView = (url = "") => {
-  const trimmed = String(url || "").trim();
-  if (!trimmed || isBlockedWebViewScheme(trimmed) || isHttpOrWebContentUrl(trimmed)) {
-    return false;
-  }
-  return true;
-};
-
-const openOutsideWebView = (url) => {
-  const targetUrl = String(url || "").trim();
-  if (!targetUrl || isBlockedWebViewScheme(targetUrl)) return;
-  Linking.openURL(targetUrl).catch((err) => {
-    console.warn("Failed to open URL:", targetUrl, err);
-  });
-};
-
-const launchInAppReview = async () => {
-  try {
-    const available = await StoreReview.isAvailableAsync();
-    if (!available) {
-      const storeUrl = StoreReview.storeUrl();
-      if (storeUrl) {
-        openOutsideWebView(storeUrl);
-      }
-      return;
-    }
-
-    const hasAction = await StoreReview.hasAction();
-    if (!hasAction) {
-      const storeUrl = StoreReview.storeUrl();
-      if (storeUrl) {
-        openOutsideWebView(storeUrl);
-      }
-      return;
-    }
-
-    // May complete without showing a dialog (Play/Apple quota).
-    await StoreReview.requestReview();
-  } catch (error) {
-    console.warn("In-app review request failed:", error);
-  }
-};
-
-/** Ask OS for RECORD_AUDIO so WebView getUserMedia / SpeechRecognition can work. */
-const requestMicrophonePermission = async () => {
-  try {
-    // expo-av covers iOS + Android and surfaces the system prompt.
-    const Audio = getExpoAudio();
-    if (Audio?.requestPermissionsAsync) {
-      const permission = await Audio.requestPermissionsAsync();
-      if (permission?.granted || permission?.status === "granted") {
-        return true;
-      }
-      if (permission?.status === "denied" || permission?.granted === false) {
-        return false;
-      }
-    }
-  } catch (error) {
-    console.warn("expo-av microphone permission failed, falling back:", error);
-  }
-
-  try {
-    if (Platform.OS === "android") {
-      const alreadyGranted = await PermissionsAndroid.check(
-        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
-      );
-      if (alreadyGranted) return true;
-
-      const result = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-        {
-          title: "Microphone permission",
-          message: "LittleKart needs microphone access for voice search.",
-          buttonPositive: "Allow",
-          buttonNegative: "Deny",
-          buttonNeutral: "Ask Me Later",
-        }
-      );
-      return result === PermissionsAndroid.RESULTS.GRANTED;
-    }
-
-    // iOS: WKWebView prompts once NSMicrophoneUsageDescription is present.
+async function ensureMicrophonePermission() {
+  if (Platform.OS !== "android") {
+    // iOS prompts via NSMicrophoneUsageDescription when WebView requests mic.
     return true;
+  }
+
+  try {
+    const existing = await PermissionsAndroid.check(
+      PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
+    );
+    if (existing) return true;
+
+    const result = await PermissionsAndroid.request(
+      PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+      {
+        title: "Microphone permission",
+        message:
+          "LittleKart needs microphone access so you can search products by voice.",
+        buttonPositive: "Allow",
+        buttonNegative: "Deny",
+      }
+    );
+    return result === PermissionsAndroid.RESULTS.GRANTED;
   } catch (error) {
     console.warn("Microphone permission request failed:", error);
     return false;
   }
-};
-
-/** Runs before any page script: inject Maps key for Places search + lock pinch-zoom (viewport). */
-const webviewInjectedJavaScriptBeforeContentLoaded = `
-(function () {
-  try {
-    var k = ${JSON.stringify(WEBVIEW_GOOGLE_MAPS_API_KEY)};
-    if (k) window.__LK_GOOGLE_MAPS_API_KEY__ = k;
-  } catch (e0) {}
-  try {
-    var c = "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover";
-    var m = document.querySelector('meta[name="viewport"]');
-    if (m) m.setAttribute("content", c);
-    else if (document.head) {
-      m = document.createElement("meta");
-      m.setAttribute("name", "viewport");
-      m.setAttribute("content", c);
-      document.head.insertBefore(m, document.head.firstChild);
-    }
-  } catch (e1) {}
-})();
-true;
-`;
+}
 
 export default function App() {
-  const EXIT_BACK_PRESS_INTERVAL_MS = 2000;
-  const BACK_PRESS_DEBOUNCE_MS = 700;
-  const EXIT_SUPPRESS_AFTER_NAV_MS = 1500;
   const [loading, setLoading] = useState(true);
   const webviewRef = useRef(null);
   const navStateRef = useRef({ canGoBack: false, url: "" });
-  const lastBackAttemptRef = useRef(0);
-  const lastBackHandledAtRef = useRef(0);
-  const suppressExitUntilRef = useRef(0);
   const loadTimeoutRef = useRef(null);
-  // true = local web/DB (never production). Phone can't reach LAN, so use a
-  // Cloudflare tunnel to localhost:3000 while developing (see terminal).
+  const insets = useSafeAreaInsets();
   const USE_LOCAL_WEB_URL = false;
   const PROD_WEB_URL = "https://littlekart.com";
-  // LAN IP (works only if phone can reach PC). Prefer DEV_WEB_TUNNEL_URL below.
-  const LOCAL_LAN_WEB_URL = Platform.select({
-    android: "http://192.168.31.169:3000",
-    ios: "http://192.168.1.253:3000",
-    default: "http://192.168.31.169:3000",
+  const LOCAL_WEB_URL = Platform.select({
+    android: "http://10.0.2.2:3000",
+    ios: "http://192.168.1.200:3000",
+    default: "http://192.168.1.253:3000",
   });
-  // From: npx cloudflared tunnel --url http://localhost:3000
-  const DEV_WEB_TUNNEL_URL =
-    "https://fully-tower-platinum-handmade.trycloudflare.com";
-  const LOCAL_WEB_URL = DEV_WEB_TUNNEL_URL || LOCAL_LAN_WEB_URL;
   // Dynamic cache-buster generated once per app launch.
   const WEB_RELEASE_VERSION = useRef(`${Date.now()}`).current;
 
@@ -240,7 +84,14 @@ export default function App() {
               '.ReactModal__Overlay--after-open',
               '.MuiModal-root',
               '.chakra-modal__content-container',
-              '[data-state="open"][data-dialog-content]'
+              '[data-state="open"][data-dialog-content]',
+              '.razorpay-container',
+              '.razorpay-checkout-frame',
+              '.razorpay-backdrop',
+              'iframe[src*="razorpay"]',
+              'iframe[src*="checkout"]',
+              '[class*="razorpay"]',
+              '[id*="razorpay"]'
             ];
             var lockClasses = [
               'modal-open',
@@ -285,16 +136,10 @@ export default function App() {
             }
 
             function forceEnableScroll(html, body) {
+              // Removed forced overflow styles - they break position:sticky
               if (!html || !body) return;
-              html.style.setProperty('overflow', 'auto', 'important');
-              html.style.setProperty('height', 'auto', 'important');
               html.style.setProperty('touch-action', 'auto', 'important');
-              html.style.setProperty('overscroll-behavior', 'auto', 'important');
-              body.style.setProperty('overflow', 'auto', 'important');
-              body.style.setProperty('overflow-y', 'auto', 'important');
-              body.style.setProperty('height', 'auto', 'important');
               body.style.setProperty('touch-action', 'auto', 'important');
-              body.style.setProperty('overscroll-behavior', 'auto', 'important');
               body.style.setProperty('-webkit-overflow-scrolling', 'touch', 'important');
             }
 
@@ -319,23 +164,9 @@ export default function App() {
               var body = document.body;
               if (!body || !html) return;
 
-              // Some modal libs forget to restore these after close.
-              resetStyle(html, 'overflow');
-              resetStyle(html, 'position');
-              resetStyle(html, 'height');
+              // Only reset touch-action, preserve overflow for sticky positioning
               resetStyle(html, 'touchAction');
-              resetStyle(html, 'overscrollBehavior');
-              resetStyle(body, 'overflow');
-              resetStyle(body, 'overflowY');
-              resetStyle(body, 'position');
-              resetStyle(body, 'top');
-              resetStyle(body, 'left');
-              resetStyle(body, 'right');
-              resetStyle(body, 'width');
-              resetStyle(body, 'height');
               resetStyle(body, 'touchAction');
-              resetStyle(body, 'overscrollBehavior');
-              resetStyle(body, 'webkitOverflowScrolling');
               forceEnableScroll(html, body);
               lockClasses.forEach(function (name) {
                 html.classList.remove(name);
@@ -359,12 +190,20 @@ export default function App() {
               });
 
               // If a full-screen transparent layer is still catching touches, disable it.
+              // But NEVER touch payment-related elements (Razorpay, PayU, Paytm, etc.)
               var allEls = document.body.querySelectorAll('*');
               for (var i = 0; i < allEls.length; i++) {
                 var el = allEls[i];
                 var style = window.getComputedStyle(el);
                 if (style.pointerEvents === 'none') continue;
                 if (style.position !== 'fixed' && style.position !== 'absolute') continue;
+                
+                // Skip payment gateway elements
+                var elStr = (el.className || '') + (el.id || '') + (el.src || '');
+                var isPaymentEl = /razorpay|payu|paytm|checkout|payment/i.test(elStr);
+                if (isPaymentEl) continue;
+                if (el.tagName === 'IFRAME') continue;
+                
                 var rect = el.getBoundingClientRect();
                 var coversScreen =
                   rect.width >= window.innerWidth * 0.95 &&
@@ -413,80 +252,24 @@ export default function App() {
   /* ===============================
      ANDROID BACK BUTTON HANDLING
   ================================ */
-  /** SPA path for HashRouter (#/cart) or path-based routing; home is "/" only. */
-  const getWebAppPath = (url) => {
-    if (!url) return "/";
+  const normalizeUrl = (url) => {
+    if (!url) return "";
     try {
-      const u = new URL(url);
-      const hash = u.hash || "";
-      if (hash.length > 1) {
-        const route = hash.startsWith("#") ? hash.slice(1) : hash;
-        const p = route.startsWith("/") ? route : `/${route}`;
-        const trimmed = p.replace(/\/+$/, "");
-        return trimmed === "" ? "/" : trimmed;
-      }
-      const path = u.pathname.replace(/\/+$/, "") || "/";
-      return path;
+      const parsed = new URL(url);
+      const path = parsed.pathname.replace(/\/+$/, "");
+      return `${parsed.origin}${path}`;
     } catch (_) {
-      return "/";
+      return url.replace(/\/+$/, "");
     }
   };
 
   const isHomeUrl = (url) => {
-    if (!url) return false;
-    try {
-      const current = new URL(url);
-      const base = new URL(webUrl);
-      if (current.origin !== base.origin) return false;
-      const path = getWebAppPath(url);
-      const normalizedPath = path === "" ? "/" : path;
-      const hasSearch = Boolean(current.search && current.search !== "?");
-      const hash = current.hash || "";
-      const normalizedHash = hash.replace(/^#/, "");
-      const hasRouteHash =
-        normalizedHash !== "" && normalizedHash !== "/" && normalizedHash !== "#";
-      return normalizedPath === "/" && !hasSearch && !hasRouteHash;
-    } catch (_) {
-      return false;
-    }
+    return normalizeUrl(url) === normalizeUrl(webUrl);
   };
-
-  const replyMicrophonePermission = useCallback((granted) => {
-    if (!webviewRef.current) return;
-    const payload = JSON.stringify({
-      type: "MICROPHONE_PERMISSION_RESULT",
-      granted: Boolean(granted),
-    });
-    webviewRef.current.injectJavaScript(`
-      (function () {
-        try {
-          var payload = ${JSON.stringify(payload)};
-          window.dispatchEvent(new MessageEvent("message", { data: payload }));
-          document.dispatchEvent(new MessageEvent("message", { data: payload }));
-        } catch (e) {}
-      })();
-      true;
-    `);
-  }, []);
 
   const onMessage = useCallback(async (event) => {
     try {
       const data = JSON.parse(event?.nativeEvent?.data ?? "{}");
-
-      if (data?.type === "EXIT_APP") {
-        if (Platform.OS === "android") {
-          const { canGoBack, url } = navStateRef.current;
-          if (!isHomeUrl(url) || canGoBack) return;
-          const now = Date.now();
-          if (now - lastBackAttemptRef.current >= EXIT_BACK_PRESS_INTERVAL_MS) {
-            lastBackAttemptRef.current = now;
-            ToastAndroid.show("Press back again to exit", ToastAndroid.SHORT);
-            return;
-          }
-          BackHandler.exitApp();
-        }
-        return;
-      }
 
       if (data?.type === "SHARE_APP") {
         const { title, text, url } = data?.payload || {};
@@ -498,81 +281,68 @@ export default function App() {
         return;
       }
 
-      if (data?.type === "OPEN_EXTERNAL_URL" && data?.url) {
-        openOutsideWebView(data.url);
-        return;
-      }
-
+      // Web page is about to use getUserMedia / voice search.
       if (data?.type === "REQUEST_MICROPHONE_PERMISSION") {
-        const granted = await requestMicrophonePermission();
-        replyMicrophonePermission(granted);
-        return;
-      }
-
-      if (data?.type === "REQUEST_IN_APP_REVIEW") {
-        await launchInAppReview();
+        const granted = await ensureMicrophonePermission();
+        const payload = JSON.stringify({
+          type: "MICROPHONE_PERMISSION_RESULT",
+          granted,
+        });
+        webviewRef.current?.injectJavaScript?.(
+          `window.dispatchEvent(new MessageEvent('message', { data: ${JSON.stringify(
+            payload
+          )} })); true;`
+        );
       }
     } catch (_) {
       // Ignore malformed bridge messages
     }
-  }, [EXIT_BACK_PRESS_INTERVAL_MS, replyMicrophonePermission]);
+  }, []);
 
   const handleShouldStartLoadWithRequest = (request) => {
-    const url = String(request?.url || "");
-    if (isBlockedWebViewScheme(url)) {
-      return false;
+    const url = request.url;
+
+    // Handle external app URLs (phone, email, messaging, payments)
+    const externalSchemes = [
+      "tel:",
+      "mailto:",
+      "whatsapp:",
+      "upi:",
+      "phonepe:",
+      "paytm:",
+      "gpay:",
+      "tez:",
+      "bhim:",
+      "credpay:",
+      "amazonpay:",
+      "intent:",
+    ];
+
+    const isExternalUrl = externalSchemes.some(scheme => url.startsWith(scheme));
+
+    if (isExternalUrl) {
+      Linking.openURL(url).catch(err => {
+        console.warn("Failed to open URL:", url, err);
+      });
+      return false; // Prevent WebView from loading
     }
-    if (shouldOpenOutsideWebView(url)) {
-      openOutsideWebView(url);
-      return false;
+
+    // Allow all http/https URLs
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+      return true;
     }
-    return true;
+
+    // For any other schemes, try to open externally
+    Linking.canOpenURL(url).then(supported => {
+      if (supported) {
+        Linking.openURL(url).catch(err => {
+          console.warn("Failed to open URL:", url, err);
+        });
+      }
+    });
+
+    return false;
   };
-
-  const navigateToHome = useCallback(() => {
-    if (!webviewRef.current) return;
-    webviewRef.current.injectJavaScript(`
-      (function () {
-        try {
-          var homeUrl = ${JSON.stringify(webUrl)};
-          window.location.href = homeUrl;
-        } catch (e) {}
-      })();
-      true;
-    `);
-  }, [webUrl]);
-
-  const triggerWebBack = useCallback(() => {
-    if (!webviewRef.current) return;
-    webviewRef.current.injectJavaScript(`
-      (function () {
-        try {
-          if (window.history && window.history.length > 1) {
-            window.history.back();
-            return;
-          }
-          if (
-            window.location &&
-            window.location.hash &&
-            window.location.hash !== "#/" &&
-            window.location.hash !== "#"
-          ) {
-            window.location.hash = "#/";
-            return;
-          }
-          var backEl =
-            document.querySelector('[aria-label="Back"]') ||
-            document.querySelector('[title="Back"]') ||
-            document.querySelector('[data-testid="back"]') ||
-            document.querySelector('.back-button');
-          if (backEl && typeof backEl.click === "function") {
-            backEl.click();
-          }
-        } catch (e) {}
-      })();
-      true;
-    `);
-  }, []);
 
   const startLoading = () => {
     setLoading(true);
@@ -594,57 +364,30 @@ export default function App() {
   };
 
   useEffect(() => {
+    // Ask early so the first voice-search tap is not blocked.
+    ensureMicrophonePermission();
+  }, []);
+
+  useEffect(() => {
     const onBackPress = () => {
       if (Platform.OS !== "android") return false;
-      const now = Date.now();
-
-      // Some devices fire duplicate hardware back events in quick succession.
-      // Swallow the duplicate so it doesn't chain into an unwanted app exit.
-      if (now - lastBackHandledAtRef.current < BACK_PRESS_DEBOUNCE_MS) {
-        return true;
-      }
-      lastBackHandledAtRef.current = now;
 
       const { canGoBack, url } = navStateRef.current;
-      const canNavigateInsideApp = canGoBack || !isHomeUrl(url);
-
-      // For non-home / back-capable states, always navigate within app first.
-      if (canNavigateInsideApp) {
-        lastBackAttemptRef.current = 0;
-        suppressExitUntilRef.current = now + EXIT_SUPPRESS_AFTER_NAV_MS;
-        if (canGoBack && webviewRef.current) {
-          webviewRef.current.goBack();
-          return true;
-        }
-        triggerWebBack();
-        return true;
-      }
-
-      // Home: require double back press to avoid accidental exits.
-      if (now < suppressExitUntilRef.current) {
-        lastBackAttemptRef.current = now;
-        ToastAndroid.show("Press back again to exit", ToastAndroid.SHORT);
-        return true;
-      }
-      const recentlyTried = now - lastBackAttemptRef.current < EXIT_BACK_PRESS_INTERVAL_MS;
-      if (recentlyTried) {
+      if (!canGoBack || isHomeUrl(url)) {
         BackHandler.exitApp();
         return true;
       }
-      lastBackAttemptRef.current = now;
-      ToastAndroid.show("Press back again to exit", ToastAndroid.SHORT);
-      return true;
 
+      if (webviewRef.current) {
+        webviewRef.current.goBack();
+        return true;
+      }
+      return false;
     };
 
     const sub = BackHandler.addEventListener("hardwareBackPress", onBackPress);
     return () => sub.remove();
-  }, [
-    EXIT_BACK_PRESS_INTERVAL_MS,
-    BACK_PRESS_DEBOUNCE_MS,
-    EXIT_SUPPRESS_AFTER_NAV_MS,
-    triggerWebBack,
-  ]);
+  }, [webUrl]);
 
   useEffect(() => {
     return () => {
@@ -654,10 +397,7 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    requestLocationPermission();
-  }, []);
-
+  
   return (
     <SafeAreaView
       style={styles.safeArea}
@@ -670,32 +410,52 @@ export default function App() {
         ref={webviewRef}
         source={{ uri: webUrl }}
         style={styles.webview}
-        cacheEnabled={false}
         javaScriptEnabled
         domStorageEnabled
-        geolocationEnabled
         originWhitelist={["*"]}
         mixedContentMode="always"
-        mediaPlaybackRequiresUserAction={false}
         allowsInlineMediaPlayback
+        mediaPlaybackRequiresUserAction={false}
+        // Required for getUserMedia / voice search inside the WebView.
         mediaCapturePermissionGrantType="grant"
-        onGeolocationPermissionsShowPrompt={(origin, callback) => {
-          requestLocationPermission().then((granted) => {
-            callback(origin, granted, false);
-          });
-        }}
-        injectedJavaScriptBeforeContentLoaded={webviewInjectedJavaScriptBeforeContentLoaded}
-        {...(Platform.OS === "android"
-          ? { setBuiltInZoomControls: false, setDisplayZoomControls: false }
-          : {})}
+        allowsBackForwardNavigationGestures
+        // iOS scroll performance optimizations
+        scrollEnabled={true}
+        bounces={true}
+        decelerationRate="normal"
+        showsVerticalScrollIndicator={true}
+        showsHorizontalScrollIndicator={false}
+        directionalLockEnabled={true}
+        // Android performance
+        androidLayerType="hardware"
+        overScrollMode="always"
+        nestedScrollEnabled={true}
+        setBuiltInZoomControls={false}
+        setSupportZoom={false}
+        textZoom={100}
+        // Better caching
+        cacheEnabled={true}
+        cacheMode="LOAD_DEFAULT"
+        // Pull to refresh (optional - uncomment if you want it)
+        // pullToRefreshEnabled={true}
+        // Inject CSS for smoother scrolling
+        injectedJavaScriptBeforeContentLoaded={`
+          (function() {
+            var style = document.createElement('style');
+            style.textContent = 'html,body{-webkit-overflow-scrolling:touch!important;overscroll-behavior:contain}*{-webkit-tap-highlight-color:transparent}';
+            document.head.appendChild(style);
+          })();
+          true;
+        `}
         injectedJavaScript={webviewInjectedJavaScript}
+        onShouldStartLoadWithRequest={handleShouldStartLoadWithRequest}
         onNavigationStateChange={(navState) => {
           navStateRef.current = {
-            canGoBack: Boolean(navState.canGoBack),
-            url: navState.url || "",
+            canGoBack: navState.canGoBack,
+            url: navState.url,
           };
         }}
-        onShouldStartLoadWithRequest={handleShouldStartLoadWithRequest}
+        onMessage={onMessage}
         onLoadStart={startLoading}
         onLoadEnd={stopLoading}
         onLoadProgress={({ nativeEvent }) => {
@@ -708,7 +468,6 @@ export default function App() {
           stopLoading();
         }}
         onHttpError={stopLoading}
-        onMessage={onMessage}
       />
 
       {loading && (

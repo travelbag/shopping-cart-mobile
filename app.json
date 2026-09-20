@@ -2,9 +2,9 @@
   "expo": {
     "name": "LittleKart",
     "slug": "shopping-cart-mobile",
-    "version": "1.0.4",
+    "version": "1.0.7",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/icon_rakhi.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
@@ -15,9 +15,10 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.littlekart.shoppingcart",
-      "buildNumber": "2",
-      "appStoreUrl": "https://apps.apple.com/us/app/littlekart/id6757442090",
+      "buildNumber": "6",
       "infoPlist": {
+        "CFBundleShortVersionString": "1.0.7",
+        "CFBundleVersion": "6",
         "NSLocationWhenInUseUsageDescription": "We need your location to show nearby stores and delivery availability.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Location is required to detect your delivery location.",
         "NSMicrophoneUsageDescription": "LittleKart needs microphone access for voice search.",
@@ -26,27 +27,25 @@
           "NSAllowsArbitraryLoadsInWebContent": true
         },
         "LSApplicationQueriesSchemes": [
-          "upi",
+          "phonepe",
           "tez",
           "gpay",
-          "phonepe",
-          "paytmmp",
           "paytm",
           "bhim",
+          "upi",
           "credpay",
           "amazonpay",
-          "ppe"
+          "whatsapp"
         ]
       }
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/icon_rakhi.png",
         "backgroundColor": "#ffffff"
       },
       "package": "com.littlekart.shoppingcart",
-      "versionCode": 20,
-      "playStoreUrl": "https://play.google.com/store/apps/details?id=com.littlekart.shoppingcart",
+      "versionCode": 18,
       "permissions": [
         "INTERNET",
         "ACCESS_FINE_LOCATION",
