@@ -2,23 +2,23 @@
   "expo": {
     "name": "LittleKart",
     "slug": "shopping-cart-mobile",
-    "version": "1.0.7",
+    "version": "1.0.10",
     "orientation": "portrait",
-    "icon": "./assets/icon_rakhi.png",
+    "icon": "./assets/icon_navratri.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/loading_groceries.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.littlekart.shoppingcart",
-      "buildNumber": "6",
+      "buildNumber": "9",
       "infoPlist": {
-        "CFBundleShortVersionString": "1.0.7",
-        "CFBundleVersion": "6",
+        "CFBundleShortVersionString": "1.0.10",
+        "CFBundleVersion": "9",
         "NSLocationWhenInUseUsageDescription": "We need your location to show nearby stores and delivery availability.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Location is required to detect your delivery location.",
         "NSMicrophoneUsageDescription": "LittleKart needs microphone access for voice search.",
@@ -41,11 +41,11 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/icon_rakhi.png",
+        "foregroundImage": "./assets/icon_navratri.png",
         "backgroundColor": "#ffffff"
       },
       "package": "com.littlekart.shoppingcart",
-      "versionCode": 18,
+      "versionCode": 21,
       "permissions": [
         "INTERNET",
         "ACCESS_FINE_LOCATION",

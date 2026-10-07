@@ -1,4 +1,5 @@
 import { StatusBar } from "expo-status-bar";
+import * as SplashScreen from "expo-splash-screen";
 import {
   StyleSheet,
   View,
@@ -8,11 +9,17 @@ import {
   Share,
   Linking,
   PermissionsAndroid,
+  Image,
+  Animated,
+  Easing,
 } from "react-native";
 import { WebView } from "react-native-webview";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+// Keep splash screen visible until app is ready
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 async function ensureMicrophonePermission() {
   if (Platform.OS !== "android") {
@@ -45,15 +52,34 @@ async function ensureMicrophonePermission() {
 
 export default function App() {
   const [loading, setLoading] = useState(true);
+  const [loadProgress, setLoadProgress] = useState(0);
+  const [contentReady, setContentReady] = useState(false);
   const webviewRef = useRef(null);
   const navStateRef = useRef({ canGoBack: false, url: "" });
   const loadTimeoutRef = useRef(null);
+  const appStartTime = useRef(Date.now()).current;
+  const MIN_LOADING_TIME = 2000; // Show loading for at least 2 seconds
+  const spinValue = useRef(new Animated.Value(0)).current;
+
+  // Slow spin animation
+  useEffect(() => {
+    if (loading) {
+      Animated.loop(
+        Animated.timing(spinValue, {
+          toValue: 1,
+          duration: 6000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      ).start();
+    }
+  }, [loading, spinValue]);
   const insets = useSafeAreaInsets();
   const USE_LOCAL_WEB_URL = false;
   const PROD_WEB_URL = "https://littlekart.com";
   const LOCAL_WEB_URL = Platform.select({
     android: "http://10.0.2.2:3000",
-    ios: "http://192.168.1.200:3000",
+    ios: "http://192.168.1.199:3000",
     default: "http://192.168.1.253:3000",
   });
   // Dynamic cache-buster generated once per app launch.
@@ -346,6 +372,7 @@ export default function App() {
 
   const startLoading = () => {
     setLoading(true);
+    setLoadProgress(0);
     if (loadTimeoutRef.current) {
       clearTimeout(loadTimeoutRef.current);
     }
@@ -360,7 +387,16 @@ export default function App() {
       clearTimeout(loadTimeoutRef.current);
       loadTimeoutRef.current = null;
     }
-    setLoading(false);
+    setContentReady(true);
+    
+    // Ensure minimum loading time for branding
+    const elapsed = Date.now() - appStartTime;
+    const remainingTime = Math.max(0, MIN_LOADING_TIME - elapsed);
+    
+    setTimeout(() => {
+      setLoading(false);
+      SplashScreen.hideAsync().catch(() => {});
+    }, remainingTime);
   };
 
   useEffect(() => {
@@ -459,6 +495,7 @@ export default function App() {
         onLoadStart={startLoading}
         onLoadEnd={stopLoading}
         onLoadProgress={({ nativeEvent }) => {
+          setLoadProgress(nativeEvent.progress);
           if (nativeEvent.progress === 1) {
             stopLoading();
           }
@@ -472,7 +509,30 @@ export default function App() {
 
       {loading && (
         <View style={styles.loading}>
-          <ActivityIndicator size="large" color="#111" />
+          {/* Spinning groceries ring */}
+          <Animated.Image
+            source={require("./assets/groceries_ring.png")}
+            style={[
+              styles.loadingRing,
+              {
+                transform: [
+                  {
+                    rotate: spinValue.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ["0deg", "360deg"],
+                    }),
+                  },
+                ],
+              },
+            ]}
+            resizeMode="contain"
+          />
+          {/* Static LittleKart logo in center */}
+          <Image
+            source={require("./assets/icon_original.png")}
+            style={styles.loadingLogo}
+            resizeMode="contain"
+          />
         </View>
       )}
     </SafeAreaView>
@@ -495,5 +555,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     justifyContent: "center",
     alignItems: "center"
-  }
+  },
+  loadingRing: {
+    width: 300,
+    height: 300,
+    position: "absolute",
+  },
+  loadingLogo: {
+    width: 100,
+    height: 100,
+    position: "absolute",
+    borderRadius: 50,
+  },
 });
