@@ -57,23 +57,67 @@ export default function App() {
   const webviewRef = useRef(null);
   const navStateRef = useRef({ canGoBack: false, url: "" });
   const loadTimeoutRef = useRef(null);
-  const appStartTime = useRef(Date.now()).current;
-  const MIN_LOADING_TIME = 2000; // Show loading for at least 2 seconds
+  const MIN_LOADING_TIME = 2000; // Show the spinning loader for at least 2 seconds
   const spinValue = useRef(new Animated.Value(0)).current;
+  const spinLoopRef = useRef(null);
+  const loaderShownAt = useRef(null);
+  const contentReadyRef = useRef(false);
+  const dismissTimerRef = useRef(null);
 
-  // Slow spin animation
-  useEffect(() => {
-    if (loading) {
-      Animated.loop(
-        Animated.timing(spinValue, {
-          toValue: 1,
-          duration: 6000,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        })
-      ).start();
+  const startSpin = useCallback(() => {
+    if (spinLoopRef.current) return;
+    const loop = Animated.loop(
+      Animated.timing(spinValue, {
+        toValue: 1,
+        duration: 6000,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    );
+    spinLoopRef.current = loop;
+    loop.start();
+  }, [spinValue]);
+
+  const scheduleDismissLoader = useCallback(() => {
+    if (!contentReadyRef.current || loaderShownAt.current == null) return;
+    if (dismissTimerRef.current) {
+      clearTimeout(dismissTimerRef.current);
     }
-  }, [loading, spinValue]);
+    const elapsed = Date.now() - loaderShownAt.current;
+    const remainingTime = Math.max(0, MIN_LOADING_TIME - elapsed);
+    dismissTimerRef.current = setTimeout(() => {
+      setLoading(false);
+      spinLoopRef.current?.stop();
+    }, remainingTime);
+  }, []);
+
+  // Native splash stays white. Hide it only after the ring is already spinning
+  // so a still groceries frame never flashes first.
+  const onLoaderLayout = useCallback(() => {
+    if (loaderShownAt.current != null) {
+      scheduleDismissLoader();
+      return;
+    }
+    startSpin();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (loaderShownAt.current != null) return;
+        loaderShownAt.current = Date.now();
+        SplashScreen.hideAsync().catch(() => {});
+        scheduleDismissLoader();
+      });
+    });
+  }, [scheduleDismissLoader, startSpin]);
+
+  useEffect(() => {
+    startSpin();
+    return () => {
+      spinLoopRef.current?.stop();
+      if (dismissTimerRef.current) {
+        clearTimeout(dismissTimerRef.current);
+      }
+    };
+  }, [startSpin]);
   const insets = useSafeAreaInsets();
   const USE_LOCAL_WEB_URL = false;
   const PROD_WEB_URL = "https://littlekart.com";
@@ -378,6 +422,7 @@ export default function App() {
     }
     // Prevent endless spinner on network timeout/poor connectivity.
     loadTimeoutRef.current = setTimeout(() => {
+      SplashScreen.hideAsync().catch(() => {});
       setLoading(false);
     }, 20000);
   };
@@ -388,15 +433,15 @@ export default function App() {
       loadTimeoutRef.current = null;
     }
     setContentReady(true);
-    
-    // Ensure minimum loading time for branding
-    const elapsed = Date.now() - appStartTime;
-    const remainingTime = Math.max(0, MIN_LOADING_TIME - elapsed);
-    
-    setTimeout(() => {
-      setLoading(false);
+    contentReadyRef.current = true;
+    // If the loader never laid out, still reveal the app instead of
+    // leaving the native splash on screen.
+    if (loaderShownAt.current == null) {
+      loaderShownAt.current = Date.now();
       SplashScreen.hideAsync().catch(() => {});
-    }, remainingTime);
+      startSpin();
+    }
+    scheduleDismissLoader();
   };
 
   useEffect(() => {
@@ -508,7 +553,7 @@ export default function App() {
       />
 
       {loading && (
-        <View style={styles.loading}>
+        <View style={styles.loading} onLayout={onLoaderLayout}>
           {/* Spinning groceries ring */}
           <Animated.Image
             source={require("./assets/groceries_ring.png")}
