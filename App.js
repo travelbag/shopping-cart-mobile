@@ -55,7 +55,7 @@ export default function App() {
   }, []);
   const insets = useSafeAreaInsets();
   const USE_LOCAL_WEB_URL = false;
-  const PROD_WEB_URL = "https://littlekart.com";
+  const PROD_WEB_URL = "https://www.littlekart.com";
   const LOCAL_WEB_URL = Platform.select({
     android: "http://10.0.2.2:3000",
     ios: "http://192.168.1.199:3000",
