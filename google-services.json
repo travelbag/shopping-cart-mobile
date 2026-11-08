@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "707607979202",
+    "project_id": "littlekart-mobile",
+    "storage_bucket": "littlekart-mobile.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:707607979202:android:813a80457578735c96075b",
+        "android_client_info": {
+          "package_name": "com.littlekart.shoppingcart"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDv0_7elzwOayBg8mrFVx8X0EIpc6VSsZ8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
